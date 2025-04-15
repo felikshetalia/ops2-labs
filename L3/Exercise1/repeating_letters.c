@@ -24,6 +24,20 @@ void usage(char* name)
     exit(EXIT_FAILURE);
 }
 
+void count_occurences(char* ptr){
+    int freq[256] = {0}; // One slot for each ASCII character
+
+    for (int i = 0; ptr[i] != '\0'; i++) {
+        unsigned char ch = ptr[i];
+        freq[ch]++;
+    }
+
+    for (int i = 0; i < 256; i++) {
+        if (freq[i] > 0)
+            printf("'%c' → %d times\n", i, freq[i]);
+    }
+}
+
 int main(int argc, char** argv)
 {
     int fd;
@@ -35,6 +49,7 @@ int main(int argc, char** argv)
         ERR("mmap");
     }
     printf("%s\n", ptr);
+    count_occurences(ptr);
     close(fd);
     if(munmap(ptr, MSG_LEN) < 0){
         ERR("munmap");
