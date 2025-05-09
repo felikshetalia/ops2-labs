@@ -71,9 +71,52 @@ typedef struct{
     int attack;
 }knight_t;
 
-// void child_work(int* FranciPipes, int* SaraceniPipes, int fNo, int sNo){
+void child_work(knight_t attacker, int readEndOwn, int* enemyPipes, int enemyCount){
+    srand(getpid());
+    fcntl(readEndOwn, F_SETFL, O_NONBLOCK);
+    int ret;
+    char buf; // hit received
+    while(1){
+        //simulate the receiving damage
+        while(1){
+            if((ret = read(readEndOwn, &buf, 1)) < 0){
+                if(errno == EAGAIN) break;
+                else ERR("read");
+            }
+            //if(ret == 0) break;
+            if(ret > 0)
+                attacker.HP -= buf;
+        }
+        // simulate the attack
+        while(1){
+            int random_enemy_idx = rand() % enemyCount;
+            char rand_attack = rand() % attacker.attack;
+            int res;
+            if((res = write(enemyPipes[2*random_enemy_idx+1], &rand_attack, 1)) < 0){
+                ERR("write");
+            }
 
-// }
+            if(rand_attack == 0){
+                printf("%s attacks his enemy, however he deflected\n", attacker.name);
+            }
+            if(rand_attack <= 5 && rand_attack >= 1){
+                printf("%s goes to strike, he hit right and well\n", attacker.name);
+            }
+            if(rand_attack >= 6){
+                printf("%s strikes powerful blow, the shield he breaks and inflicts a big wound\n", attacker.name);
+            }
+            msleep(rand() % 11);
+        }
+    }
+    if(close(readEndOwn) < 0){
+        ERR("close");
+    }
+    for(int i = 0; i < enemyCount; i++){
+        if(close(enemyPipes[2*i+1]) < 0){
+            ERR("close");
+        }
+    }
+}
 
 void create_knights_and_pipes(int fNo, int sNo, knight_t* FrancisArray, knight_t* SaracenisArray){
     int* FranciPipes, *SaraceniPipes;
@@ -121,6 +164,7 @@ void create_knights_and_pipes(int fNo, int sNo, knight_t* FrancisArray, knight_t
                 }
             }
             printf("I am Frankish knight %s. I will serve my king with my %d HP and %d attack\n",FrancisArray[i].name, FrancisArray[i].HP, FrancisArray[i].attack);
+            child_work(FrancisArray[i], FranciPipes[2*i], SaraceniPipes, sNo);
             free(FranciPipes);
             free(SaraceniPipes);
             free(FrancisArray);
@@ -153,7 +197,7 @@ void create_knights_and_pipes(int fNo, int sNo, knight_t* FrancisArray, knight_t
                 }
             }
             printf("I am Spanish knight %s. I will serve my king with my %d HP and %d attack\n",SaracenisArray[i].name, SaracenisArray[i].HP, SaracenisArray[i].attack);
-            
+            child_work(SaracenisArray[i], SaraceniPipes[2*i], FranciPipes, fNo);
             free(FranciPipes);
             free(SaraceniPipes);
             free(FrancisArray);
