@@ -55,7 +55,7 @@ void add_new_client_handler(struct epoll_event ev, Client_t* ClientList){
 void handle_client_messages(int accepted_client){
     char input[4];
     int ret;
-    do{
+    // do{
         ret = bulk_read(accepted_client, input, 4);
         if(ret < 0)
             ERR("read");
@@ -68,7 +68,7 @@ void handle_client_messages(int accepted_client){
             printf("%s\n", input);
         }
 
-    } while(ret <= sizeof(char[4]));
+    // } while(ret <= sizeof(char[4]));
 }
 
 int main(int argc, char** argv){
@@ -106,21 +106,21 @@ int main(int argc, char** argv){
         if((nfds = epoll_wait(epoll_descriptor, events, MAX_EVENTS, -1)) > 0){
             for(int i = 0; i < nfds; i++){
                 if(events[i].data.fd == server_fd){
+                    int accepted_client = add_new_client(events[i].data.fd);
                     if(active_connections >= MAX_CLIENTS){
                         // we reject
-                        if (write(events[i].data.fd, "Server is full\n", 16) < 0)
+                        if (write(accepted_client, "Server is full\n", 16) < 0)
                         {
                             if (errno != EPIPE)
                             {
                                 ERR("write");
                             }
-                            if (TEMP_FAILURE_RETRY(close(events[i].data.fd)) < 0)
+                            if (TEMP_FAILURE_RETRY(close(accepted_client)) < 0)
                                 ERR("close");
                         }
                     }
                     else{
                         // add a NEW client
-                        int accepted_client = add_new_client(events[i].data.fd);
                         ClientList[active_connections].fd = accepted_client;
                         printf("[%d] New client connected\n",ClientList[active_connections].fd);
                         //set up a new epoll event for client messages
