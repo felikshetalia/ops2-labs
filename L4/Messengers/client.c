@@ -4,7 +4,7 @@
 #define MAX_CLIENTS 4
 #define MAX_EVENTS 16
 #define CITIES_COUNT 20
-
+volatile int run = 1;
 void usage(char* argv){
     printf("Address and a port\n");
     exit(0);
@@ -32,6 +32,10 @@ const char* greek_cities[CITIES_COUNT] = {
     "Phocaea",
     "Halicarnassus"
 };
+
+void sigint_handler(int sig){
+    run = 0;
+}
 
 void print_ownership_table(int ownership_table[CITIES_COUNT]){
     printf("-----STATS-----\n");
@@ -78,11 +82,23 @@ void shell_wait(int fd, int ownership_table[CITIES_COUNT], struct epoll_event ev
         ERR("epoll_wait");
 
     char full_line[6];
-    while(1){
+    while(run){
         printf("Welcome, enter a command\n");
         fflush(stdout);
         //printf(">");
         for(int i = 0; i < nfds; i++){
+
+            if(run == 0){
+                print_ownership_table(ownership_table);
+                for(int n = 0; n < nfds; n++)
+                    if(TEMP_FAILURE_RETRY(close(events[n].data.fd)) < 0)
+                        ERR("close");
+                if(TEMP_FAILURE_RETRY(close(fd)) < 0)
+                    ERR("close");
+                if(TEMP_FAILURE_RETRY(close(epfd)) < 0)
+                    ERR("close");
+            }
+
             if(events[i].data.fd == fd){
                 read_from_server(fd, ownership_table);
             }
@@ -171,7 +187,7 @@ int main(int argc, char **argv)
     if(argc != 3){
         usage(argv[0]);
     }
-
+    sethandler(sigint_handler, SIGINT);
     int ownership_table[CITIES_COUNT] = {0};
     // assume all are greek initially
     int sucket = connect_tcp_socket(argv[1], argv[2]);
