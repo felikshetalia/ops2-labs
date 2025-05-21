@@ -53,22 +53,20 @@ void add_new_client_handler(struct epoll_event ev, Client_t* ClientList){
 }
 
 void handle_client_messages(int accepted_client){
-    char input[4];
     int ret;
-    // do{
-        ret = bulk_read(accepted_client, input, 4);
-        if(ret < 0)
-            ERR("read");
-        if(ret == 0){
-            if(TEMP_FAILURE_RETRY(close(accepted_client)) < 0)
-                ERR("close");
-    
-        }
-        if(ret > 0){
-            printf("%s\n", input);
-        }
+ 
+    char input[4];
+    ret = bulk_read(accepted_client, input, 4);
+    if(ret < 0)
+        ERR("read");
+    if(ret == 0){
+        return;
+    }
+    // if(ret == 4){
+    //     printf("%.*s\n", ret, input);
+    // }
+    printf("%.*s\n", ret, input);
 
-    // } while(ret <= sizeof(char[4]));
 }
 
 int main(int argc, char** argv){
@@ -126,9 +124,10 @@ int main(int argc, char** argv){
                         //set up a new epoll event for client messages
                         struct epoll_event client_event;
                         client_event.events = EPOLLIN;
-                        client_event.data.fd = ClientList[active_connections].fd;
-                        if (epoll_ctl(epoll_descriptor, EPOLL_CTL_ADD, ClientList[active_connections].fd, &client_event) == -1)
+                        client_event.data.fd = accepted_client;
+                        if (epoll_ctl(epoll_descriptor, EPOLL_CTL_ADD, accepted_client, &client_event) == -1)
                         {
+                            close(accepted_client);
                             perror("epoll_ctl: listen_sock");
                             exit(EXIT_FAILURE);
                         }
