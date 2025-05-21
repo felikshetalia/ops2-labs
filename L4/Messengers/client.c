@@ -45,84 +45,123 @@ void print_ownership_table(int ownership_table[CITIES_COUNT]){
     }
 }
 
-void shell_wait(int fd, int ownership_table[CITIES_COUNT]){
+void read_from_server(int fd, int ownership_table[CITIES_COUNT]){
+    char msg[MESS_SIZE];
+    int ret;
+    if((ret = bulk_read(fd, msg, MESS_SIZE)) < 0){
+        ERR("read");
+    }
+    if(ret == 0){
+        // server disconnected
+        exit(0);
+    }
+    if(ret == MESS_SIZE){
+        if(msg[0] == 'p' || msg[0] == 'g'){
+            int city_id;
+            int tens = msg[1] - '0';
+            int ones = msg[2] - '0';
+            city_id = tens*10 + ones;
+            if(msg[0] == 'p'){
+                ownership_table[city_id-1] = 1;
+            }
+            else{
+                ownership_table[city_id-1] = 0;
+            }
+        }
+        printf("%.*s\n", ret, msg);
+    }
+}
+
+void shell_wait(int fd, int ownership_table[CITIES_COUNT], struct epoll_event events[MAX_EVENTS], int epfd){
+    int nfds;
+    if((nfds = epoll_wait(epfd, events, MAX_EVENTS, -1)) < 0)
+        ERR("epoll_wait");
+
     char full_line[6];
     while(1){
         printf("Welcome, enter a command\n");
         fflush(stdout);
         //printf(">");
-        //fetch the message
-        if(fgets(full_line, 6, stdin) == NULL){
-            ERR("fgets");
-        }
-        // if exit
-        if(full_line[0] == 'e'){
-            if(TEMP_FAILURE_RETRY(close(fd)) < 0)
-                ERR("close");
-            return;
-        }
-        // if message
-        if(full_line[0] == 'm' && full_line[1] == ' '){
-            char msg[MESS_SIZE];
-            // if(fgets(msg, MESS_SIZE, stdin) == NULL){
-            //     if(TEMP_FAILURE_RETRY(close(fd)) < 0)
-            //         ERR("close");
-            //     ERR("fgets");
-            // }
-            msg[0] = full_line[2];
-            msg[1] = full_line[3];
-            msg[2] = full_line[4];
-            full_line[5] = '\0';
-            msg[3] = '\n';
-            if(bulk_write(fd, msg, MESS_SIZE) < 0){
-                ERR("write");
+        for(int i = 0; i < nfds; i++){
+            if(events[i].data.fd == fd){
+                read_from_server(fd, ownership_table);
             }
+            if(events[i].data.fd == STDIN_FILENO){
 
-            int city_id;
-            int tens = msg[1] - '0';
-            int ones = msg[2] - '0';
-            city_id = tens*10 + ones;
-            if(msg[0] == 'p'){
-                ownership_table[city_id-1] = 1;
-            }
-            else{
-                ownership_table[city_id-1] = 0;
-            }
-        }
-
-        // if travel
-        if(full_line[0] == 't' && full_line[1] == ' '){
-            char msg[MESS_SIZE];
-            if(rand()%2 == 0){
-                msg[0] = 'g';
-            }
-            else{
-                msg[0] = 'p';
-            }
-            msg[1] = full_line[2];
-            msg[2] = full_line[3];
-            full_line[4] = '\0';
-            msg[3] = '\n';
-
-            if(bulk_write(fd, msg, MESS_SIZE) < 0){
-                ERR("write");
-            }
-
-            int city_id;
-            int tens = msg[1] - '0';
-            int ones = msg[2] - '0';
-            city_id = tens*10 + ones;
-            if(msg[0] == 'p'){
-                ownership_table[city_id-1] = 1;
-            }
-            else{
-                ownership_table[city_id-1] = 0;
-            }
-        }
+                //fetch the message
+                if(fgets(full_line, 6, stdin) == NULL){
+                    ERR("fgets");
+                }
+                // if exit
+                if(full_line[0] == 'e'){
+                    if(TEMP_FAILURE_RETRY(close(fd)) < 0)
+                        ERR("close");
+                    return;
+                }
+                // if message
+                if(full_line[0] == 'm' && full_line[1] == ' '){
+                    char msg[MESS_SIZE];
+                    // if(fgets(msg, MESS_SIZE, stdin) == NULL){
+                    //     if(TEMP_FAILURE_RETRY(close(fd)) < 0)
+                    //         ERR("close");
+                    //     ERR("fgets");
+                    // }
+                    msg[0] = full_line[2];
+                    msg[1] = full_line[3];
+                    msg[2] = full_line[4];
+                    full_line[5] = '\0';
+                    msg[3] = '\n';
+                    if(bulk_write(fd, msg, MESS_SIZE) < 0){
+                        ERR("write");
+                    }
         
-        // if print
-        if(full_line[0] == 'o'){
-            print_ownership_table(ownership_table);
+                    int city_id;
+                    int tens = msg[1] - '0';
+                    int ones = msg[2] - '0';
+                    city_id = tens*10 + ones;
+                    if(msg[0] == 'p'){
+                        ownership_table[city_id-1] = 1;
+                    }
+                    else{
+                        ownership_table[city_id-1] = 0;
+                    }
+                }
+        
+                // if travel
+                if(full_line[0] == 't' && full_line[1] == ' '){
+                    char msg[MESS_SIZE];
+                    if(rand()%2 == 0){
+                        msg[0] = 'g';
+                    }
+                    else{
+                        msg[0] = 'p';
+                    }
+                    msg[1] = full_line[2];
+                    msg[2] = full_line[3];
+                    full_line[4] = '\0';
+                    msg[3] = '\n';
+        
+                    if(bulk_write(fd, msg, MESS_SIZE) < 0){
+                        ERR("write");
+                    }
+        
+                    int city_id;
+                    int tens = msg[1] - '0';
+                    int ones = msg[2] - '0';
+                    city_id = tens*10 + ones;
+                    if(msg[0] == 'p'){
+                        ownership_table[city_id-1] = 1;
+                    }
+                    else{
+                        ownership_table[city_id-1] = 0;
+                    }
+                }
+                
+                // if print
+                if(full_line[0] == 'o'){
+                    print_ownership_table(ownership_table);
+                }
+            }
         }
     }
 }
@@ -135,15 +174,36 @@ int main(int argc, char **argv)
 
     int ownership_table[CITIES_COUNT] = {0};
     // assume all are greek initially
-
     int sucket = connect_tcp_socket(argv[1], argv[2]);
 
-    shell_wait(sucket, ownership_table);
+    int epoll_descriptor;
+    if ((epoll_descriptor = epoll_create1(0)) < 0)
+    {
+        ERR("epoll_create:");
+    }
+    struct epoll_event event, events[MAX_EVENTS];
+    event.data.fd = sucket;
+    event.events = EPOLLIN;
+    if (epoll_ctl(epoll_descriptor, EPOLL_CTL_ADD, sucket, &event) == -1)
+    {
+        perror("epoll_ctl: listen_sock");
+        exit(EXIT_FAILURE);
+    }
+    event.data.fd = STDIN_FILENO;
+    event.events = EPOLLIN;
+    if (epoll_ctl(epoll_descriptor, EPOLL_CTL_ADD, STDIN_FILENO, &event) == -1)
+    {
+        perror("epoll_ctl: listen_sock");
+        exit(EXIT_FAILURE);
+    }
+
+    shell_wait(sucket, ownership_table, events, epoll_descriptor);
 
     // close the connection
-    // if(TEMP_FAILURE_RETRY(close(sucket)) < 0){
-    //     ERR("close");
-    // }
+    if(TEMP_FAILURE_RETRY(close(epoll_descriptor)) < 0){
+        ERR("close");
+    }
+
     return 0;
 }
 
