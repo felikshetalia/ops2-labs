@@ -12,7 +12,23 @@ void usage(char* argv){
 
 int main(int argc, char **argv)
 {
-    usage(argv[0]);
+    if(argc != 3){
+        usage(argv[0]);
+    }
+    int sucket = connect_tcp_socket(argv[1], argv[2]);
+    char buffer[MESS_SIZE];
+    if(fgets(buffer, MESS_SIZE, stdin) == NULL){
+        close(sucket);
+        ERR("fgets");
+    }
+    if(bulk_write(sucket, buffer, 4) < 0){
+        ERR("write");
+    }
+
+    // close the connection
+    if(TEMP_FAILURE_RETRY(close(sucket)) < 0){
+        ERR("close");
+    }
     return 0;
 }
 
