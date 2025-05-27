@@ -1,17 +1,24 @@
-L_FLAGS=-lrt -fsanitize=address,undefined
+override CFLAGS=-Wall -Wextra -fanalyzer -g -O0 -fsanitize=address,undefined -lm
 
-TARGET=sop-railway
-FILES=${TARGET}.o
+ifdef CI
+override CFLAGS=-Wall -Wextra -Werror -lm
+endif
 
-.PHONY: clean all
+.PHONY: all clean clean-resources
 
-${TARGET} : ${FILES}
-	${CC} ${L_FLAGS} -o ${TARGET} ${FILES}
+all: sop-railway sop-train
 
-${TARGET}.o: ${TARGET}.c
-	${CC} ${C_FLAGS} -o ${TARGET}.o -c ${TARGET}.c
+railway.o : railway.c railway.h
+	gcc $(CFLAGS) -c -o $@ $<
 
-all: ${TARGET}
+sop-railway: sop-railway.c macros.h railway.o
+	gcc $(CFLAGS) -o $@ $< railway.o
+
+sop-train: sop-train.c macros.h railway.o
+	gcc $(CFLAGS) -o $@ $< railway.o
 
 clean:
-	rm -f ${FILES} ${TARGET}
+	rm -f sop-railway sop-train *.o
+
+clean-resources:
+	rm -f /dev/shm/sop-shmem
