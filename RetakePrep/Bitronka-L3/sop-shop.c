@@ -41,6 +41,10 @@ void usage(char* program_name)
     exit(EXIT_FAILURE);
 }
 
+typedef struct DATA_COMMON{
+    pthread_mutex_t MutexesArray[MAX_SHELVES];
+}DATA_COMMON;
+
 void ms_sleep(unsigned int milli)
 {
     time_t sec = (int)(milli / 1000);
@@ -70,6 +74,74 @@ void print_array(int* array, int n)
     printf("\n");
 }
 
+pthread_mutexattr_t init_mutex(){
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST);
+    //pthread_mutex_init(&obj->data_mtx, &attr);
+    return attr;
+}
+
+void mutex_lock_handler(pthread_mutex_t* mutex)
+{
+    int error;
+    if ((error = pthread_mutex_lock(mutex)) != 0)
+    {
+        if (error == EOWNERDEAD)
+        {
+            pthread_mutex_consistent(mutex);
+        }
+        else
+        {
+            ERR("pthread_mutex_lock");
+        }
+    }
+}
+
+void child_work(int n, int* ShopArray, DATA_COMMON* sharedData)
+{
+    srand(getpid());
+
+    int a;
+    for(int i=0;i<10;i++){
+        int b = rand() % n + 1;
+        while((a = rand() % n + 1) == b);
+            
+        if(a > b)
+            SWAP(a,b);
+        if(ShopArray[a-1] > ShopArray[b-1]){
+            mutex_lock_handler(&sharedData->MutexesArray[a]);
+            mutex_lock_handler(&sharedData->MutexesArray[b]);
+
+            SWAP(ShopArray[a-1], ShopArray[b-1]);
+            
+            pthread_mutex_unlock(&sharedData->MutexesArray[a]);
+            pthread_mutex_unlock(&sharedData->MutexesArray[b]);
+
+        }
+        ms_sleep(100);
+    }
+
+}
+
+void create_children(int m, int n, int* ShopArray, DATA_COMMON* sharedData){
+    srand(getpid());
+    pid_t pid;
+    for(int i=0;i<m;i++){
+        pid = fork();
+        if(pid == 0){
+            printf("[%d] Worker reports for a night shift\n", getpid());
+            child_work(n, ShopArray, sharedData);
+            exit(0);
+        }
+        if(pid < 0){
+            ERR("fork");
+        }
+
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 3) {
@@ -94,6 +166,16 @@ int main(int argc, char** argv)
 
     close(fd);
 
+    DATA_COMMON *sharedData = (DATA_COMMON*)mmap(NULL, sizeof(DATA_COMMON), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if(MAP_FAILED == sharedData)
+        ERR("mmap");
+
+    pthread_mutexattr_t attr = init_mutex();
+    for(int i = 0; i < MAX_SHELVES; i++)
+    {
+        pthread_mutex_init(&sharedData->MutexesArray[i], &attr);
+    }
+
     for(int i = 0; i < productsNo; i++)
     {
         ShopArray[i] = i+1;
@@ -101,7 +183,20 @@ int main(int argc, char** argv)
     shuffle(ShopArray, productsNo);
     print_array(ShopArray, productsNo);
 
+    create_children(workersNo, productsNo, ShopArray, sharedData);
+    
+    while(wait(NULL) > 0);
+    print_array(ShopArray, productsNo);
+    printf("Night shift at bitronka is over\n");
+    for(int i = 0; i < MAX_SHELVES; i++)
+    {
+        pthread_mutex_destroy(&sharedData->MutexesArray[i]);
+    }
+    pthread_mutexattr_destroy(&attr);
     if(munmap(ShopArray, productsNo*sizeof(int)) < 0)
+        ERR("munmap");
+    if(msync(ShopArray, productsNo*sizeof(int), MS_SYNC))
+    if(munmap(sharedData, sizeof(DATA_COMMON)) < 0)
         ERR("munmap");
 
     return 0;
