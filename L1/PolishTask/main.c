@@ -36,6 +36,10 @@ void msleep(int millisec)
     }
 }
 
+void sigpipe_handler(int sig){
+
+}
+
 int count_descriptors()
 {
     int count = 0;
@@ -73,27 +77,46 @@ typedef struct{
 
 void child_work(knight_t attacker, int readEndOwn, int* enemyPipes, int enemyCount){
     srand(getpid());
+    int AliveKnightsCount = enemyCount;
+    int aliveFlag = 1;
     fcntl(readEndOwn, F_SETFL, O_NONBLOCK);
     int ret;
     char buf; // hit received
-    while(1){
+    while(aliveFlag && AliveKnightsCount){
         //simulate the receiving damage
-        while(1){
+        while(aliveFlag && AliveKnightsCount){
             if((ret = read(readEndOwn, &buf, 1)) < 0){
                 if(errno == EAGAIN) break;
                 else ERR("read");
             }
-            //if(ret == 0) break;
-            if(ret > 0)
+            if(ret == 0){
+                AliveKnightsCount = 0;
+                break;
+            }
+            if(ret > 0){
                 attacker.HP -= buf;
+                if(attacker.HP <= 0){
+                    printf("%s dies\n", attacker.name);
+                    //AliveKnightsCount--;
+                    aliveFlag = 0;
+                }
+            }
+            
         }
         // simulate the attack
-        while(1){
+        while(aliveFlag && AliveKnightsCount){
             int random_enemy_idx = rand() % enemyCount;
             char rand_attack = rand() % attacker.attack;
             int res;
             if((res = write(enemyPipes[2*random_enemy_idx+1], &rand_attack, 1)) < 0){
-                ERR("write");
+                if(errno == EPIPE){
+                    AliveKnightsCount--;
+                    int tmp = enemyPipes[2*random_enemy_idx + 1];
+                    enemyPipes[2*random_enemy_idx + 1] = enemyPipes[2*AliveKnightsCount+1];
+                    enemyPipes[2*AliveKnightsCount+1] = tmp;
+                    continue;
+                }
+                else ERR("write");
             }
 
             if(rand_attack == 0){
@@ -106,6 +129,7 @@ void child_work(knight_t attacker, int readEndOwn, int* enemyPipes, int enemyCou
                 printf("%s strikes powerful blow, the shield he breaks and inflicts a big wound\n", attacker.name);
             }
             msleep(rand() % 11);
+            break;
         }
     }
     if(close(readEndOwn) < 0){
@@ -234,7 +258,7 @@ int main(int argc, char* argv[])
         printf("Saracens have not arrived on the battlefield\n");
         ERR("fopen");
     }
-
+    set_handler(SIG_IGN, SIGPIPE);
     int numFrancis, numSaracenis;
     fscanf(franciFD, "%d", &numFrancis);
     fscanf(saraceniFD, "%d", &numSaracenis);
@@ -256,7 +280,7 @@ int main(int argc, char* argv[])
     for(int i = 0; i < numSaracenis; i++){
         fscanf(saraceniFD, "%s %d %d", SaracenisArray[i].name, &SaracenisArray[i].HP, &SaracenisArray[i].attack);
     }
-
+    // set_handler();
     create_knights_and_pipes(numFrancis, numSaracenis, FrancisArray, SaracenisArray);
     while(wait(NULL) > 0);
     free(FrancisArray);
