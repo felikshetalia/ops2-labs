@@ -81,20 +81,74 @@ void usage(char* program)
 
 void first_brigade_work(int production_pipe_write, int boss_pipe)
 {
+    // int rd_num = rand() % (max - min + 1) + min; ---> SYNTAX
+    // prod pipe == main pipe to a worker
+    // boss pipe == pipe from worker to boss, write end
     srand(getpid());
-
+    while(1){
+        char c = 'A' + rand() % ('Z' - 'A');
+        msleep(rand() % (10 - 1 + 1) + 1);
+        if(write(production_pipe_write, &c, 1) < 0)
+            ERR("write");
+        else
+            printf("[%d] First brigade wrote: %c\n", getpid(), c);
+    }
     printf("Worker %d from the first brigade: descriptors: %d\n", getpid(), count_descriptors());
 }
 void second_brigade_work(int production_pipe_write, int production_pipe_read, int boss_pipe)
 {
-    srand(getpid());
+    //srand(getpid());
+    // read from 1, send multiple copies to 3
+    char buf;
+    while(1)
+    {
+        if(read(production_pipe_read, &buf, 1) < 0)
+            ERR("read");
+        else
+            printf("[%d] Second brigade read: %c\n", getpid(), buf);
 
+        msleep(rand()%11);
+        int how_many_iters = rand() % (4 - 1 + 1) + 1;
+        printf("[%d] Second brigade wrote:", getpid());
+
+        for(int i = 0; i < how_many_iters; i++)
+        {
+            if(write(production_pipe_write, &buf, 1) < 0)
+                ERR("write");
+            else
+                printf("%c", buf);
+        }
+        printf("\n");
+
+    }
 
     printf("Worker %d from the second brigade: descriptors: %d\n", getpid(), count_descriptors());
 }
 void third_brigade_work(int production_pipe_read, int boss_pipe)
 {
-    srand(getpid());
+    //srand(getpid());
+    // read every 1-3ms
+    ssize_t total_bytes = 0;
+    char buf;
+    while(1)
+    {
+        int ret;
+        if((ret = read(production_pipe_read,&buf, 1)) < 0)
+            ERR("read");
+        if(ret == 0)
+            break;
+        if(ret > 0){
+            total_bytes += ret;
+            if(total_bytes == 5)
+            {
+                printf("[%d] Second brigade read: ", getpid());
+                for(int i = 0; i < total_bytes; i++)
+                    printf("%c", buf);
+                printf("\n");
+                continue;
+            }
+        }
+    }
 
     printf("Worker %d from the third brigade: descriptors: %d\n", getpid(), count_descriptors());
 }
@@ -185,8 +239,7 @@ void create_workers(int w1, int w2, int w3)
             if(close(FROM_1_TO_2[0]) < 0) 
                 ERR("close");
             // 1st brigade won't read from r12 but will write so keep [1] open
-            sleep(1); // simulate work
-
+            first_brigade_work(FROM_1_TO_2[1], w1_pipes[2*i+1]);
             if(close(FROM_1_TO_2[1]) < 0) 
                 ERR("close");
             if(close(w1_pipes[2*i+1]) < 0)
@@ -246,7 +299,7 @@ void create_workers(int w1, int w2, int w3)
             if(close(FROM_1_TO_2[1]) < 0) 
                 ERR("close");
 
-            sleep(1); // simulate work
+            second_brigade_work(FROM_2_TO_3[1], FROM_1_TO_2[0], w2_pipes[2*i+1]);
 
             if(close(FROM_1_TO_2[0]) < 0) 
                 ERR("close");
@@ -312,7 +365,7 @@ void create_workers(int w1, int w2, int w3)
                 ERR("close");
 
 
-            sleep(1); // simulate work
+            third_brigade_work(FROM_2_TO_3[0], w3_pipes[2*i+1]);
 
             if(close(FROM_2_TO_3[0]) < 0) 
                 ERR("close");
