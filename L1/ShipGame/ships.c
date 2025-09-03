@@ -35,6 +35,35 @@ void usage(char *name){
     exit(EXIT_FAILURE);
 }
 
+int count_descriptors()
+{
+    int count = 0;
+    DIR* dir;
+    struct dirent* entry;
+    struct stat stats;
+    if ((dir = opendir("/proc/self/fd")) == NULL)
+        ERR("opendir");
+    char path[PATH_MAX];
+    getcwd(path, PATH_MAX);
+    chdir("/proc/self/fd");
+    do
+    {
+        errno = 0;
+        if ((entry = readdir(dir)) != NULL)
+        {
+            if (lstat(entry->d_name, &stats))
+                ERR("lstat");
+            if (!S_ISDIR(stats.st_mode))
+                count++;
+        }
+    } while (entry != NULL);
+    if (chdir(path))
+        ERR("chdir");
+    if (closedir(dir))
+        ERR("closedir");
+    return count - 1;  // one descriptor for open directory
+}
+
 typedef struct {
     int* cards;
     pid_t pid;
@@ -87,6 +116,12 @@ void create_players(int N, int M, player_t* playersList, int* deck){
         ERR("calloc");
     }
 
+    for(int i = 0; i < N; i++){
+        if(pipe(&playerPipes[2*i]) < 0){
+            ERR("pipe");
+        }
+    }
+
     pid_t pid;
 
     for(int i = 0; i < N; i++){
@@ -95,6 +130,34 @@ void create_players(int N, int M, player_t* playersList, int* deck){
         if(pid < 0) ERR("fork");
         if(pid == 0){
             //child runs
+            
+            // every child has pipe Pn->Pn+1
+            // playerPipes[0] is between child 0 and 1
+            // 0 sends 1 a card and reads from N
+            //open read end of the prev pipe, write end of the next pipe
+
+            for(int j = 0; j < N; j++){
+                if(i != j){
+                    if(close(playerPipes[2*j+1]) < 0){
+                        ERR("close");
+                    }
+                }
+                if(i == 0){
+                    if(j < N-1){
+                        if(close(playerPipes[2*j])<0){
+                            ERR("close");
+                        }
+                    }
+                }
+                else{
+                    if(i!=j){
+                        if(close(playerPipes[2*j])<0){
+                            ERR("close");
+                        }
+                    }
+                }
+            }
+
             printf("[%d] Cards: ", getpid());
             playersList[i].pid = getpid();
             print_array(playersList[i].cards, M);
@@ -102,6 +165,13 @@ void create_players(int N, int M, player_t* playersList, int* deck){
             free(playerPipes);
             exit(0);
         }
+    }
+    for(int j = 0; j < 2*N; j++){
+        
+        if(close(playerPipes[j])<0){
+            ERR("close");
+        }
+
     }
     free(playerPipes);
 
@@ -146,5 +216,6 @@ int main(int argc, char **argv){
         free(playersList[i].cards);
     }
     free(playersList);
+    printf("Open descriptors = %d\n", count_descriptors());
     return 0;
 }
