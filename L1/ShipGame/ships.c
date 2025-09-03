@@ -68,18 +68,13 @@ void print_array(int* array, int n)
 void deal_random_cards(int* wholeDeck, int* playerCards, int M){
     srand(getpid());
     for(int i = 0; i < M; i++){
-        int randIdx = rand() % 52;
-        int prevIdx;
-        if(wholeDeck[randIdx]){
-            playerCards[i] = wholeDeck[randIdx];
-            wholeDeck[randIdx] = 0;
-            prevIdx = randIdx;
-        }
-        else{
-            prevIdx = randIdx;
-            srand(getpid());
-            while((randIdx = rand() % 52) == prevIdx);
-        }
+        int randIdx;
+        do {
+            randIdx = rand() % 52;
+        } while (wholeDeck[randIdx] == 0);
+
+        playerCards[i] = wholeDeck[randIdx];
+        wholeDeck[randIdx] = 0;   // mark taken
     }
 
 }
@@ -100,6 +95,10 @@ void create_players(int N, int M, player_t* playersList, int* deck){
         if(pid < 0) ERR("fork");
         if(pid == 0){
             //child runs
+            printf("[%d] Cards: ", getpid());
+            playersList[i].pid = getpid();
+            print_array(playersList[i].cards, M);
+
             free(playerPipes);
             exit(0);
         }
@@ -138,10 +137,7 @@ int main(int argc, char **argv){
     }
     for(int i=0;i<N;i++){
         srand(getpid());
-        deal_random_cards(deck, playersList[i].cards, M);
-        print_array(playersList[i].cards, M);
-    
-        printf("\n\n");
+        deal_random_cards(deck, playersList[i].cards, M);    
     }
 
     create_players(N,M,playersList, deck);
