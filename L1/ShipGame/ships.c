@@ -108,37 +108,50 @@ void deal_random_cards(int* wholeDeck, int* playerCards, int M){
 
 }
 
-void child_work(player_t player, int writeEndNext, int readEndPrev){
+void child_work(player_t player, int writeEndNext, int readEndPrev, int M){
+    srand(getpid());
     while(1)
     {    
         // loop for sending
         while(1){
-            int randIdx = rand()%5;
+
+            int randIdx;
+            do{
+                randIdx = rand() % M;
+            }while(player.cards[randIdx] == 0);
+    
             int cardToDiscard = player.cards[randIdx];
             player.cards[randIdx] = 0;
+    
             if(write(writeEndNext, &cardToDiscard, sizeof(int)) < 0){
                 if(errno == EPIPE) break;
     
                 ERR("write");
             }
             printf("[%d] Sent %d\n", player.pid, cardToDiscard);
-            sleep(1);
             break;
+            
         }
         // loop for receiving
         while(1){
+
             int cardReceived;
             ssize_t ret;
             if((ret = read(readEndPrev, &cardReceived, sizeof(int))) < 0){
                 if(errno == EAGAIN) break;
-    
+                
                 ERR("read");
             }
             if(ret){
+                int i = -1;
+                while(player.cards[++i] != 0);
+                player.cards[i] = cardReceived;
                 printf("[%d] Received %d\n", player.pid, cardReceived);
             }
+            sleep(1);
             break;
         }
+
     }
 }
 
@@ -169,34 +182,40 @@ void create_players(int N, int M, player_t* playersList, int* deck){
             // playerPipes[0] is between child 0 and 1
             // 0 sends 1 a card and reads from N
             //open read end of the prev pipe, write end of the next pipe
-
+            int prev = (i-1+N)%N;
             for(int j = 0; j < N; j++){
-                if(i != j){
-                    if(close(playerPipes[2*j+1]) < 0){
+                if(i == j){
+                    // own
+                    if(close(playerPipes[2*j]) < 0){
                         ERR("close");
                     }
                 }
-                if(i == 0){
-                    if(j < N-1){
-                        if(close(playerPipes[2*j])<0){
-                            ERR("close");
-                        }
+                else if(j == prev){
+
+                    if(close(playerPipes[2*j+1])<0){
+                        ERR("close");
                     }
+                    
                 }
                 else{
-                    if(i!=j){
-                        if(close(playerPipes[2*j])<0){
-                            ERR("close");
-                        }
+    
+                    if(close(playerPipes[2*j])<0){
+                        ERR("close");
                     }
+                    if(close(playerPipes[2*j+1])<0){
+                        ERR("close");
+                    }
+
                 }
+                
             }
+        
 
             printf("[%d] Cards: ", getpid());
             playersList[i].pid = getpid();
             print_array(playersList[i].cards, M);
             sleep(1);
-            child_work(playersList[i], playerPipes[2*i+1], playerPipes[2*i]);
+            child_work(playersList[i], playerPipes[2*i+1], playerPipes[2*prev], M);
             close(playerPipes[2*i+1]);
             if(i == 0){
                 if(close(playerPipes[2*(N-1)])<0){
@@ -213,6 +232,7 @@ void create_players(int N, int M, player_t* playersList, int* deck){
             free(playerPipes);
             exit(0);
         }
+        
     }
     for(int j = 0; j < 2*N; j++){
         
