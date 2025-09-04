@@ -35,19 +35,6 @@ void usage(char *name){
     exit(EXIT_FAILURE);
 }
 
-volatile sig_atomic_t trophy = 1;
-
-void handle_stop(int sig){
-    trophy = 0;
-}
-
-void usleep(int ms){
-    struct timespec ts;
-    ts.tv_sec = ms / 1000;
-    ts.tv_nsec = (ms % 1000) * 1000000L;  // convert remainder to nanoseconds
-    nanosleep(&ts, NULL);
-}
-
 int count_descriptors()
 {
     int count = 0;
@@ -132,14 +119,10 @@ int isWinning(int* cards, int M)
 
 void child_work(player_t player, int writeEndNext, int readEndPrev, int M){
     srand(getpid());
-
-    int flags = fcntl(readEndPrev, F_GETFL);
-    fcntl(readEndPrev, F_SETFL, flags | O_NONBLOCK);
-    signal(SIGUSR1, handle_stop);
-    while(trophy)
+    while(1)
     {    
         // loop for sending
-        while(trophy){
+        while(1){
 
             int randIdx;
             do{
@@ -155,22 +138,19 @@ void child_work(player_t player, int writeEndNext, int readEndPrev, int M){
                 ERR("write");
             }
             printf("[%d] Sent %d\n", player.pid, cardToDiscard);
+            
             break;
             
         }
         // loop for receiving
-        while(trophy){
+        while(1){
 
             int cardReceived;
             ssize_t ret;
             if((ret = read(readEndPrev, &cardReceived, sizeof(int))) < 0){
                 if(errno == EAGAIN) break;
-                else
-                    ERR("read");
-            }
-            if(ret == 0){
-                trophy = 0;
-                break;
+                
+                ERR("read");
             }
             if(ret){
                 int i = -1;
@@ -180,18 +160,13 @@ void child_work(player_t player, int writeEndNext, int readEndPrev, int M){
             }
             if(isWinning(player.cards, M)){
                 printf("[%d]: My ship sails!\n", player.pid);
-                trophy = 0;
-                kill(0, SIGUSR1);
                 break;
             }
-            usleep(100000);
+            sleep(1);
             break;
         }
 
     }
-
-    close(readEndPrev);
-    close(writeEndNext);
 }
 
 void create_players(int N, int M, player_t* playersList, int* deck){
