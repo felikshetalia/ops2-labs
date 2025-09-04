@@ -117,7 +117,7 @@ int isWinning(int* cards, int M)
     return 1;
 }
 
-void child_work(player_t player, int writeEndNext, int readEndPrev, int M){
+void child_work(player_t player, int writeEndNext, int readEndPrev, int M, int sharedWriteEnd){
     srand(getpid());
     while(1)
     {    
@@ -160,6 +160,9 @@ void child_work(player_t player, int writeEndNext, int readEndPrev, int M){
             }
             if(isWinning(player.cards, M)){
                 printf("[%d]: My ship sails!\n", player.pid);
+                if(write(sharedWriteEnd, &(player.pid), sizeof(pid_t)) < 0){
+                    ERR("write");
+                }
                 break;
             }
             sleep(1);
@@ -177,6 +180,11 @@ void create_players(int N, int M, player_t* playersList, int* deck){
         ERR("calloc");
     }
 
+    int SHARED[2];
+    if(pipe(SHARED) < 0){
+        ERR("pipe");
+    }
+
     for(int i = 0; i < N; i++){
         if(pipe(&playerPipes[2*i]) < 0){
             ERR("pipe");
@@ -184,7 +192,8 @@ void create_players(int N, int M, player_t* playersList, int* deck){
     }
 
     pid_t pid;
-
+    int winnerPID;
+    int winnerBytes = 0;
     for(int i = 0; i < N; i++){
         //create children
         pid = fork();
@@ -224,12 +233,12 @@ void create_players(int N, int M, player_t* playersList, int* deck){
                 
             }
         
-
+            close(SHARED[0]);
             printf("[%d] Cards: ", getpid());
             playersList[i].pid = getpid();
             print_array(playersList[i].cards, M);
             sleep(1);
-            child_work(playersList[i], playerPipes[2*i+1], playerPipes[2*prev], M);
+            child_work(playersList[i], playerPipes[2*i+1], playerPipes[2*prev], M, SHARED[1]);
             close(playerPipes[2*i+1]);
             if(i == 0){
                 if(close(playerPipes[2*(N-1)])<0){
@@ -242,11 +251,19 @@ void create_players(int N, int M, player_t* playersList, int* deck){
                 }
     
             }
-
+            close(SHARED[1]);
             free(playerPipes);
             exit(0);
         }
         
+    }
+    close(SHARED[1]);
+    if((winnerBytes = read(SHARED[0], &winnerPID, sizeof(int))) < 0){
+        ERR("read");
+    }
+    if(winnerBytes){
+        printf("[%d] won!\n", winnerPID);
+        kill(0, SIGTERM);
     }
     for(int j = 0; j < 2*N; j++){
         
@@ -255,6 +272,7 @@ void create_players(int N, int M, player_t* playersList, int* deck){
         }
 
     }
+    close(SHARED[0]);
     free(playerPipes);
 
 }
