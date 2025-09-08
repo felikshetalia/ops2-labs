@@ -42,10 +42,62 @@ void msleep(int millisec)
     }
 }
 
+void create_children(){
+    srand(getpid());
+    for(int i = 0; i < CHILD_COUNT; i++){
+        pid_t pid = fork();
+        if(pid < 0) ERR("fork");
+        if(pid == 0){
+            // client 
+            printf("[%d] Exiting…\n", getpid());
+            //client_work();
+            exit(0);
+        }
+        if(pid > 0){
+            // parent
+            msleep(100);
+        }
+    }
+}
+
 
 int main(void)
 {
-    
+    mqd_t parentQueue, workerQueue;
+
+    struct mq_attr parentAttr = {0};
+    parentAttr.mq_maxmsg = MAX_MSG_COUNT;
+    parentAttr.mq_msgsize = PARENT_MSG_SIZE;
+
+    struct mq_attr workerAttr = {0};
+    workerAttr.mq_maxmsg = MAX_MSG_COUNT;
+    workerAttr.mq_msgsize = WORK_MSG_SIZE;
+
+    if((parentQueue = mq_open(PARENT_QUEUE_NAME, O_CREAT | O_RDWR | O_NONBLOCK, 0600, &parentAttr)) == (mqd_t)-1)
+        ERR("mq_open");
+    if((workerQueue = mq_open(WORK_QUEUE_NAME, O_CREAT | O_RDWR, 0600, &workerAttr)) == (mqd_t)-1)
+        ERR("mq_open");
+
+    if(mq_setattr(parentQueue, &parentAttr, NULL) < 0)
+        ERR("mq_setattr");
+    if(mq_setattr(workerQueue, &workerAttr, NULL) < 0)
+        ERR("mq_setattr");
+
+
+    // main work
+    create_children();
+    while(wait(NULL) > 0);
+
+    // cleanup
+
+    if(mq_close(parentQueue) < 0)
+        ERR("mq_close");
+    if(mq_close(workerQueue) < 0)
+        ERR("mq_close");
+    if(mq_unlink(PARENT_QUEUE_NAME) < 0)
+        ERR("mq_close");
+    if(mq_unlink(WORK_QUEUE_NAME) < 0)
+        ERR("mq_close");
     return EXIT_SUCCESS;
 }
 
