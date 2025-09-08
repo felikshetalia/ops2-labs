@@ -8,6 +8,8 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <string.h>
+#include <stdint.h>
 
 #define PARENT_QUEUE_NAME "/parent"
 #define WORK_QUEUE_NAME "/work"
@@ -30,7 +32,6 @@ float rand_float()
 
     return rand_float * 2.0f - 1.0f;
 }
-void mq_handler(int sig, siginfo_t *info, void *p);
 
 void msleep(int millisec)
 {
@@ -40,6 +41,15 @@ void msleep(int millisec)
     while (nanosleep(&tt, &tt) == -1)
     {
     }
+}
+void sethandler(void (*f)(int, siginfo_t *, void *), int sigNo)
+{
+    struct sigaction act;
+    memset(&act, 0, sizeof(struct sigaction));
+    act.sa_sigaction = f;
+    act.sa_flags = SA_SIGINFO;
+    if (-1 == sigaction(sigNo, &act, NULL))
+        ERR("sigaction");
 }
 
 typedef struct Point_t{
@@ -54,7 +64,44 @@ int checkInDisc(Point_t pt){
     return 0;
 }
 
-void parent_work(mqd_t workQueue){
+void mq_handler(int sig, siginfo_t *info, void *p){
+    (void)sig;
+    (void)p;
+    mqd_t* parentQueue;
+    unsigned int prio;
+
+    parentQueue = (mqd_t*)info->si_value.sival_ptr;
+
+    static struct sigevent notif;
+    notif.sigev_notify = SIGEV_SIGNAL;
+    notif.sigev_signo = SIGRTMIN;
+    notif.sigev_value.sival_ptr = parentQueue;
+    if (mq_notify(*parentQueue, &notif) < 0)
+        if(errno != EBUSY)
+            ERR("mq_notify");
+
+    static int i = 0;
+    ssize_t ret;
+    uint8_t res;
+    printf("Signal detected!\n");
+    while(1){
+        if((ret = mq_receive(*parentQueue, (char*)&res, sizeof(char), &prio)) < 0){
+            if(errno == EAGAIN){
+                printf("EAGAIN\n");
+                break;
+            }
+            else ERR("mq_receive");
+        }
+
+        if(res == 1){
+            i++;
+            float pi = (4.0f*i)/ROUNDS;
+            printf("Pi approx = %.6f\n", pi);
+        }
+    }
+}
+
+void parent_work(mqd_t workQueue, mqd_t parentQueue){
     Point_t points[ROUNDS];
 
     for(int i = 0; i < ROUNDS; i++){
@@ -78,11 +125,21 @@ void child_work(mqd_t parentQueue, mqd_t workQueue){
     Point_t pt;
     while(1){
         if((ret = mq_receive(workQueue, (char*)&pt, sizeof(Point_t), 0)) < 0)
-            ERR("mq_receive");
+        {
+            if(errno == EAGAIN){
+                printf("EAGAIN\n");
+                msleep(SLEEP_TIME);
+                continue;
+            }
+            else ERR("mq_receive");
+        }
         msleep(SLEEP_TIME);
-        printf("Point (x,y): (%.2f, %2.f)\n", pt.x,pt.y);
+        printf("Point (x,y): (%.2f, %.2f)\n", pt.x,pt.y);
         if(checkInDisc(pt)){
-            printf("Point (%.2f, %2.f) list in the disc!\n", pt.x,pt.y);
+            int _bool = checkInDisc(pt);
+            printf("Point (%.2f, %.2f) list in the disc!\n", pt.x,pt.y);
+            if(mq_send(parentQueue, (const char*)&_bool, 1, 1) < 0)
+                ERR("mq_send");
         }
     }
 }
@@ -93,17 +150,15 @@ void create_children(mqd_t parentQueue, mqd_t workQueue){
         pid_t pid = fork();
         if(pid < 0) ERR("fork");
         if(pid == 0){
-            // client 
-            printf("[%d] Exiting…\n", getpid());
             child_work(parentQueue, workQueue);
             exit(0);
         }
-        if(pid > 0){
-            // parent
-            parent_work(workQueue);
-            msleep(100);
-        }
+        // if(pid > 0){
+
+        // }
     }
+    parent_work(workQueue, parentQueue);
+    msleep(100);
 }
 
 
@@ -129,8 +184,15 @@ int main(void)
     if(mq_setattr(workerQueue, &workerAttr, NULL) < 0)
         ERR("mq_setattr");
 
-
     // main work
+    sethandler(mq_handler, SIGRTMIN);
+    static struct sigevent notif;
+    notif.sigev_notify = SIGEV_SIGNAL;
+    notif.sigev_signo = SIGRTMIN;
+    notif.sigev_value.sival_ptr = &parentQueue;
+    if (mq_notify(parentQueue, &notif) < 0)
+        if(errno != EBUSY)
+            ERR("mq_notify");
     create_children(parentQueue, workerQueue);
     while(wait(NULL) > 0);
 
