@@ -42,7 +42,52 @@ void msleep(int millisec)
     }
 }
 
-void create_children(){
+typedef struct Point_t{
+    float x;
+    float y;
+} Point_t;
+
+int checkInDisc(Point_t pt){
+    if(pt.x * pt.x + pt.y * pt.y <= 1){
+        return 1;
+    }
+    return 0;
+}
+
+void parent_work(mqd_t workQueue){
+    Point_t points[ROUNDS];
+
+    for(int i = 0; i < ROUNDS; i++){
+        points[i].x = rand_float();
+        points[i].y = rand_float();
+
+        if(mq_send(workQueue, (const char*)&points[i], sizeof(Point_t), 0) < 0)
+            ERR("mq_send");
+    }
+
+}
+
+void child_work(mqd_t parentQueue, mqd_t workQueue){
+    if(mq_close(parentQueue) < 0)
+        ERR("mq_close");
+
+    if((parentQueue = mq_open(PARENT_QUEUE_NAME, O_RDWR, 0600)) == (mqd_t)-1)
+        ERR("mq_open");
+
+    ssize_t ret;
+    Point_t pt;
+    while(1){
+        if((ret = mq_receive(workQueue, (char*)&pt, sizeof(Point_t), 0)) < 0)
+            ERR("mq_receive");
+        msleep(SLEEP_TIME);
+        printf("Point (x,y): (%.2f, %2.f)\n", pt.x,pt.y);
+        if(checkInDisc(pt)){
+            printf("Point (%.2f, %2.f) list in the disc!\n", pt.x,pt.y);
+        }
+    }
+}
+
+void create_children(mqd_t parentQueue, mqd_t workQueue){
     srand(getpid());
     for(int i = 0; i < CHILD_COUNT; i++){
         pid_t pid = fork();
@@ -50,11 +95,12 @@ void create_children(){
         if(pid == 0){
             // client 
             printf("[%d] Exiting…\n", getpid());
-            //client_work();
+            child_work(parentQueue, workQueue);
             exit(0);
         }
         if(pid > 0){
             // parent
+            parent_work(workQueue);
             msleep(100);
         }
     }
@@ -85,7 +131,7 @@ int main(void)
 
 
     // main work
-    create_children();
+    create_children(parentQueue, workerQueue);
     while(wait(NULL) > 0);
 
     // cleanup
