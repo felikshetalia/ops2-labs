@@ -122,7 +122,8 @@ void child_work(player_t player, int writeEndNext, int readEndPrev, int M, int s
     while(1)
     {    
         // loop for sending
-        while(1){
+        
+        
 
             int randIdx;
             do{
