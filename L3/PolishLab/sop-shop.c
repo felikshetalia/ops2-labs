@@ -129,8 +129,8 @@ void manager_work(int N, int* shopArray, shared_t* sharedStock){
             mutex_lock_handler(&sharedStock->managerMutex);
             sharedStock->run = 0;
             pthread_mutex_unlock(&sharedStock->managerMutex);
-            kill(getpid(), SIGKILL);
-            abort();
+            // kill(getpid(), SIGKILL);
+            // abort();
             break;
         }
     }
