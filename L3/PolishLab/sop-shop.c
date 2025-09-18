@@ -8,7 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define SHOP_FILENAME "./shop"
+#define SHOP_FILENAME "/shop"
 #define MIN_SHELVES 8
 #define MAX_SHELVES 256
 #define MIN_WORKERS 1
@@ -41,7 +41,11 @@ void usage(char* program_name)
     exit(EXIT_FAILURE);
 }
 
-void msleep(unsigned int milli)
+typedef struct {
+    pthread_mutex_t shelfMutexes[MAX_SHELVES];
+}shared_t;
+
+void ms_sleep(unsigned int milli)
 {
     time_t sec = (int)(milli / 1000);
     milli = milli - (sec * 1000);
@@ -52,27 +56,12 @@ void msleep(unsigned int milli)
         ERR("nanosleep");
 }
 
-typedef struct {
-    pthread_mutex_t mutexes[MAX_SHELVES];
-    int isSorted;
-    pthread_mutex_t sortChecker;
-    int aliveWorkers;
-    pthread_mutex_t mxDeadWorkersCount;
-}SharedData_t;
-
 void shuffle(int* array, int n)
 {
     for (int i = n - 1; i > 0; i--)
     {
         int j = rand() % (i + 1);
         SWAP(array[i], array[j]);
-    }
-}
-
-void fill_array(int* arr, int n){
-    for (int i = 0; i < n; ++i)
-    {
-        arr[i] = i + 1;
     }
 }
 
@@ -84,17 +73,29 @@ void print_array(int* array, int n)
     }
     printf("\n");
 }
+void fill_array(int* array, int n)
+{
+    for (int i = 0; i < n; ++i)
+    {
+        array[i] = i+1;
+    }
+}
 
-void mutex_lock_handler(pthread_mutex_t* mutex, SharedData_t* sharedDt){
+pthread_mutexattr_t init_mutex(){
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST);
+
+    return attr;
+}
+
+void mutex_lock_handler(pthread_mutex_t* mutex){
     int error;
     if ((error = pthread_mutex_lock(mutex)) != 0)
     {
         if (error == EOWNERDEAD)
         {
-            printf("[%d] Found a dead body in aisle", getpid());
-            pthread_mutex_lock(&sharedDt->mxDeadWorkersCount);
-            sharedDt->aliveWorkers--;
-            pthread_mutex_unlock(&sharedDt->mxDeadWorkersCount);
             pthread_mutex_consistent(mutex);
         }
         else
@@ -104,82 +105,41 @@ void mutex_lock_handler(pthread_mutex_t* mutex, SharedData_t* sharedDt){
     }
 }
 
-pthread_mutexattr_t init_mtx(){
-    pthread_mutexattr_t mutexattr;
-    pthread_mutexattr_init(&mutexattr);
-    pthread_mutexattr_setpshared(&mutexattr, PTHREAD_PROCESS_SHARED);
-    pthread_mutexattr_setrobust(&mutexattr, PTHREAD_MUTEX_ROBUST);
-    return mutexattr;
-}
-
-int isSorted(int* arr, int n){
-    for (int i = 0; i < n; ++i)
-    {
-        if(arr[i] != i + 1) return 0;
-    }
-    return 1;
-}
-
-void manager_work(int productsNo, int* shop, SharedData_t* sharedDt){
-    sharedDt->isSorted = 0;
-    while(sharedDt->isSorted == 0){
-        print_array(shop,productsNo);
-        printf("[%d] Alive workers: %d\n", getpid(), sharedDt->aliveWorkers);
-        if(sharedDt->aliveWorkers == 0){
-            printf("[%d] All workers died, I hate my job\n", getpid());
-            exit(0);
-        }
-
-        if(msync(shop, sizeof(int)*productsNo, MS_SYNC)<0){
-            ERR("msync");
-        }
-        if(isSorted(shop, productsNo)){
-            mutex_lock_handler(&sharedDt->sortChecker, sharedDt);
-            sharedDt->isSorted = 1;
-            pthread_mutex_unlock(&sharedDt->sortChecker);
-            printf("[%d] The shop shelves are sorted\n", getpid());
-        }
-        msleep(500);
-    }
-}
-
-void child_work(int productsNo, int* shop, SharedData_t* sharedDt){
+void worker_thread(int N, int* shopArray, shared_t* sharedStock){
     srand(getpid());
-    int id1, id2;
-    while(!sharedDt->isSorted){
+    int idx1, idx2 = -1;
+    for(int i=0;i<10;i++){
+        idx1 = rand() % N;
+        while((idx2 = rand() % N) == idx1);
 
-        id1 = rand()%productsNo;
-        while((id2 = rand()%productsNo) == id1);
-        //printf("id1 = %d; id2 = %d\n", id1, id2); // just to check
+        if(idx2 < idx1)
+            SWAP(idx2, idx1);
 
-        // make sure id1 is the smaller one
-        if(id1 > id2) SWAP(id1,id2);
+        pthread_mutex_lock(&sharedStock->shelfMutexes[idx1]);
+        pthread_mutex_lock(&sharedStock->shelfMutexes[idx2]);
 
-        if(rand() % 100 == 0){
-            printf("[%d] Trips over pallet and dies\n", getpid());
-            abort();
+        if(shopArray[idx1] > shopArray[idx2]){
+            SWAP(shopArray[idx1], shopArray[idx2]);
+            ms_sleep(100);
         }
-
-        mutex_lock_handler(&sharedDt->mutexes[id1], sharedDt);
-        mutex_lock_handler(&sharedDt->mutexes[id2], sharedDt);
-
-        if(shop[id1] > shop[id2]) SWAP(shop[id1], shop[id2]);
-
-        pthread_mutex_unlock(&sharedDt->mutexes[id1]);
-        pthread_mutex_unlock(&sharedDt->mutexes[id2]);
-
-        msleep(100);
+        
+        pthread_mutex_unlock(&sharedStock->shelfMutexes[idx1]);
+        pthread_mutex_unlock(&sharedStock->shelfMutexes[idx2]);
+        print_array(shopArray, N);
+        ms_sleep(1000);
     }
 }
 
-void create_workers(int productsNo, int workersNo, int* shop, SharedData_t* sharedDt){
+void create_workers(int M, int N, int* shopArray, shared_t* sharedStock){
     srand(getpid());
     pid_t pid;
-    for(int i=0;i<workersNo;i++){
+    for(int i=0;i<M;i++){
         pid = fork();
         if(pid == 0){
             printf("[%d] Worker reports for a night shift\n", getpid());
-            child_work(productsNo, shop, sharedDt);
+            worker_thread(N, shopArray, sharedStock);
+            munmap(shopArray, N*sizeof(int));
+            munmap(sharedStock, sizeof(shared_t));
             exit(0);
         }
         if(pid < 0){
@@ -187,83 +147,73 @@ void create_workers(int productsNo, int workersNo, int* shop, SharedData_t* shar
         }
 
     }
-
-    // manager process
-    pid = fork();
-    if(pid == 0){
-        printf("[%d] Manager reports for a night shift\n", getpid());
-        manager_work(productsNo, shop, sharedDt);
-        exit(0);
-    }
-    if(pid < 0){
-        ERR("fork");
-    }
 }
 
-
-int main(int argc, char** argv){
-    if(argc !=3) usage(argv[0]);
-    int productsNo = atoi(argv[1]);
-    int workersNo = atoi(argv[2]);
-
-    if(productsNo < 8 ||
-        productsNo > 256 ||
-        workersNo < 1 ||
-        workersNo > 64)
-    {
+int main(int argc, char** argv) { 
+    shm_unlink(SHOP_FILENAME);
+    if(argc !=3)
         usage(argv[0]);
-    } 
 
+    int N = atoi(argv[1]);
+    int M = atoi(argv[2]);
 
-    int fd;
-    if((fd = open(SHOP_FILENAME, O_CREAT | O_RDWR | O_TRUNC, 0600)) < 0){
-        ERR("open");
+    if(N < MIN_SHELVES || N > MAX_SHELVES)
+        usage(argv[0]);
+
+    if(M < MIN_WORKERS || M > MAX_WORKERS)
+        usage(argv[0]);
+
+    int shfd;
+    if(0 > (shfd = shm_open(SHOP_FILENAME, O_CREAT | O_EXCL | O_RDWR, 0600))){
+        if(errno == EEXIST){
+            if(0 > (shfd = shm_open(SHOP_FILENAME, O_RDWR, 0600))){
+                shm_unlink(SHOP_FILENAME);
+                ERR("shm_open");
+            }
+        }
+        else{
+            shm_unlink(SHOP_FILENAME);
+            ERR("shm_open");
+        }
     }
-    if(ftruncate(fd, sizeof(int)*productsNo) < 0){
-        ERR("ftruncate");
+    else{
+        if(0 > ftruncate(shfd, sizeof(int))){
+            ERR("ftruncate");
+        }
     }
 
-    int* ShopArray = (int*)mmap(NULL, sizeof(int)*productsNo, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if(ShopArray == MAP_FAILED){
+    int* shopArray;
+    if(MAP_FAILED == (shopArray = (int*)mmap(NULL, sizeof(int)*N, PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0))){
         ERR("mmap");
     }
 
-    close(fd);
+    if(0 > close(shfd)) ERR("close");
 
-    SharedData_t* sharedDt;
-    if((sharedDt = (SharedData_t*)mmap(NULL, sizeof(SharedData_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0)) == MAP_FAILED){
+    shared_t* sharedStock;
+    if(MAP_FAILED == (sharedStock = (shared_t*)mmap(NULL, sizeof(shared_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0))){
         ERR("mmap");
     }
 
-    
-    fill_array(ShopArray, productsNo);
-    shuffle(ShopArray, productsNo);
-    print_array(ShopArray,productsNo);
+    fill_array(shopArray, N);
+    shuffle(shopArray, N);
+    print_array(shopArray,N);
 
-    pthread_mutexattr_t attr = init_mtx();
+    pthread_mutexattr_t attr = init_mutex();
     for(int i=0;i<MAX_SHELVES;i++){
-        pthread_mutex_init(&sharedDt->mutexes[i], &attr);
+        pthread_mutex_init(&sharedStock->shelfMutexes[i], &attr);
     }
-    pthread_mutex_init(&sharedDt->sortChecker, &attr);
-    pthread_mutex_init(&sharedDt->mxDeadWorkersCount, &attr);
 
-    sharedDt->aliveWorkers = workersNo;
+    create_workers(M,N, shopArray,sharedStock);
 
-    create_workers(productsNo, workersNo, ShopArray, sharedDt);
     while(wait(NULL) > 0);
-    print_array(ShopArray,productsNo);
     printf("Night shift in Bitronka is over\n");
-    if(msync(ShopArray, sizeof(int)*productsNo, MS_SYNC)<0){
-        ERR("msync");
-    }
+    print_array(shopArray,N);
+    munmap(shopArray, N*sizeof(int));
     for(int i=0;i<MAX_SHELVES;i++){
-        pthread_mutex_destroy(&sharedDt->mutexes[i]);
+        pthread_mutex_destroy(&sharedStock->shelfMutexes[i]);
     }
-    pthread_mutex_destroy(&sharedDt->sortChecker);
-    pthread_mutex_destroy(&sharedDt->mxDeadWorkersCount);
+    munmap(sharedStock, sizeof(shared_t));
     pthread_mutexattr_destroy(&attr);
-    munmap(ShopArray, sizeof(int)*productsNo);
-    munmap(sharedDt, sizeof(SharedData_t));
-
-    return 0;
+    shm_unlink(SHOP_FILENAME);
+    return EXIT_SUCCESS;
 }
