@@ -43,6 +43,8 @@ void usage(char* program_name)
 
 typedef struct {
     pthread_mutex_t shelfMutexes[MAX_SHELVES];
+    int run;
+    pthread_mutex_t managerMutex;
 }shared_t;
 
 void ms_sleep(unsigned int milli)
@@ -81,6 +83,16 @@ void fill_array(int* array, int n)
     }
 }
 
+int isSorted(int* array, int n)
+{
+    for (int i = 0; i < n-1; ++i)
+    {
+        if(array[i] > array[i+1])
+            return 0;
+    }
+    return 1;
+}
+
 pthread_mutexattr_t init_mutex(){
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
@@ -105,18 +117,37 @@ void mutex_lock_handler(pthread_mutex_t* mutex){
     }
 }
 
+void manager_work(int N, int* shopArray, shared_t* sharedStock){
+    // note: manager is a child process too
+    while(1){
+        ms_sleep(500);
+        print_array(shopArray, N);
+        if(0> msync(shopArray, sizeof(int)*N, MS_SYNC))
+            ERR("msync");
+        if(isSorted(shopArray, N)){
+            printf("[%d] The shop shelves are sorted\n", getpid());
+            mutex_lock_handler(&sharedStock->managerMutex);
+            sharedStock->run = 0;
+            pthread_mutex_unlock(&sharedStock->managerMutex);
+            kill(getpid(), SIGKILL);
+            abort();
+            break;
+        }
+    }
+}
+
 void worker_thread(int N, int* shopArray, shared_t* sharedStock){
     srand(getpid());
     int idx1, idx2 = -1;
-    for(int i=0;i<10;i++){
+    while(sharedStock->run){
         idx1 = rand() % N;
         while((idx2 = rand() % N) == idx1);
 
         if(idx2 < idx1)
             SWAP(idx2, idx1);
 
-        pthread_mutex_lock(&sharedStock->shelfMutexes[idx1]);
-        pthread_mutex_lock(&sharedStock->shelfMutexes[idx2]);
+        mutex_lock_handler(&sharedStock->shelfMutexes[idx1]);
+        mutex_lock_handler(&sharedStock->shelfMutexes[idx2]);
 
         if(shopArray[idx1] > shopArray[idx2]){
             SWAP(shopArray[idx1], shopArray[idx2]);
@@ -125,8 +156,7 @@ void worker_thread(int N, int* shopArray, shared_t* sharedStock){
         
         pthread_mutex_unlock(&sharedStock->shelfMutexes[idx1]);
         pthread_mutex_unlock(&sharedStock->shelfMutexes[idx2]);
-        print_array(shopArray, N);
-        ms_sleep(1000);
+
     }
 }
 
@@ -147,6 +177,20 @@ void create_workers(int M, int N, int* shopArray, shared_t* sharedStock){
         }
 
     }
+
+    // manager process here
+    pid = fork();
+    if(pid == 0){
+        printf("[%d] Manager reports for a night shift\n", getpid());
+        manager_work(N, shopArray, sharedStock);
+        munmap(shopArray, N*sizeof(int));
+        munmap(sharedStock, sizeof(shared_t));
+        exit(0);
+    }
+    if(pid < 0){
+        ERR("fork");
+    }
+
 }
 
 int main(int argc, char** argv) { 
@@ -203,6 +247,8 @@ int main(int argc, char** argv) {
         pthread_mutex_init(&sharedStock->shelfMutexes[i], &attr);
     }
 
+    sharedStock->run = 1;
+    pthread_mutex_init(&sharedStock->managerMutex, &attr);
     create_workers(M,N, shopArray,sharedStock);
 
     while(wait(NULL) > 0);
@@ -212,6 +258,7 @@ int main(int argc, char** argv) {
     for(int i=0;i<MAX_SHELVES;i++){
         pthread_mutex_destroy(&sharedStock->shelfMutexes[i]);
     }
+    pthread_mutex_destroy(&sharedStock->managerMutex);
     munmap(sharedStock, sizeof(shared_t));
     pthread_mutexattr_destroy(&attr);
     shm_unlink(SHOP_FILENAME);
