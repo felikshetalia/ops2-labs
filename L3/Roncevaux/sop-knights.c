@@ -78,6 +78,15 @@ int count_descriptors()
     return count - 1;  // one descriptor for open directory
 }
 
+pthread_mutexattr_t init_mutex(){
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST);
+
+    return attr;
+}
+
 void* saraceniOperate(){
 
 }
