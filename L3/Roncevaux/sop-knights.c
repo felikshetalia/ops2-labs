@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -35,6 +36,12 @@ void msleep(int millisec)
     {
     }
 }
+
+typedef struct {
+    knight_t* Francis;
+    knight_t* Saracenis;
+    pthread_mutex_t* knightMutexes;
+} threadObjs_t;
 
 typedef struct{
     char name[MAX_KNIGHT_NAME_LENGTH];
@@ -71,6 +78,20 @@ int count_descriptors()
     return count - 1;  // one descriptor for open directory
 }
 
+void* saraceniOperate(){
+
+}
+
+void* francisOperate(){
+
+}
+
+void run_thread(threadObjs_t obj){
+    int err = pthread_create(obj, NULL, francisOperate, NULL);
+    if (err != 0)
+        ERR("Couldn't create thread");
+}
+
 int main(int argc, char* argv[])
 {
     srand(getpid());
@@ -90,6 +111,8 @@ int main(int argc, char* argv[])
     fscanf(franciFile, "%d", &franciNo);
     fscanf(saraceniFile, "%d", &saraceniNo);
 
+    threadObjs_t sharedMemory;
+
     knight_t* FranciSoldiers, *SaraceniSoldiers;
 
     if((FranciSoldiers = calloc(franciNo, sizeof(knight_t))) == NULL)
@@ -107,6 +130,15 @@ int main(int argc, char* argv[])
     }
     fclose(franciFile);
     fclose(saraceniFile);
+
+    sharedMemory.Francis = FranciSoldiers;
+    sharedMemory.Saracenis = SaraceniSoldiers;
+    sharedMemory.knightMutexes = calloc(franciNo*saraceniNo, sizeof(pthread_mutex_t));
+    if(sharedMemory.knightMutexes == NULL)
+        ERR("calloc");
+
+    run_thread(sharedMemory);
+    free(sharedMemory.knightMutexes);
     free(FranciSoldiers);
     free(SaraceniSoldiers);
     printf("Opened descriptors: %d\n", count_descriptors());
