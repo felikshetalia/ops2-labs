@@ -50,25 +50,74 @@ void msleep(unsigned int milli)
     if (nanosleep(&ts, &ts))
         ERR("nanosleep");
 }
+void print_array(int* array, int n)
+{
+    for (int i = 0; i < n; ++i)
+    {
+        printf("%3d ", array[i]);
+    }
+    printf("\n");
+}
+void fill_array(int* array, int n)
+{
+    for (int i = 0; i < n; ++i)
+    {
+        array[i] = 0;
+    }
+}
+
+pthread_mutexattr_t init_mutex(){
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST);
+
+    return attr;
+}
 
 typedef struct {
     pthread_barrier_t barrier;
+    pthread_mutex_t dogMutexes[MAX_DOG_COUNT];
 } DogTools_t;
 
-void dog_work(DogTools_t* tool){
+void dog_work(DogTools_t* tool, int* raceTrack, int dogIndex, int L){
+    srand(getpid());
     pthread_barrier_wait(&tool->barrier);
     printf("[%d] waf waf waf (started race)\n", getpid());
+    int pos = 0;
+    raceTrack[pos]=getpid();
     sleep(1);
+
+    while(1)
+    {
+        int move = rand() % (MAX_MOVEMENT - MIN_MOVEMENT + 1) + MIN_MOVEMENT;
+        int dogPID = getpid();
+        pos += move;
+        if(pos > L){
+            pos = 2*L - pos - move;
+            raceTrack[pos]
+        }
+        if(raceTrack[pos + move] == 0){
+            raceTrack[pos] = 0;
+            raceTrack[pos+move] = dogPID;
+            msleep(rand()%(MAX_SLEEP - MIN_SLEEP + 1) + MIN_SLEEP);
+        }
+        else{
+            printf("waf waf waf\n");
+        }
+    }
 }
 
-void dog_breed(int N, DogTools_t* tool){
+void dog_breed(int N, int L, DogTools_t* tool, int* raceTrack){
     srand(getpid());
     pid_t pid;
     for(int i=0;i<N;i++){
         pid = fork();
         if(pid == 0){
-            dog_work(tool);
+            dog_work(tool, raceTrack, i);
+            print_array(raceTrack, L);
             munmap(tool, sizeof(DogTools_t));
+            munmap(raceTrack, sizeof(int)*L);
             exit(0);
         }
         if(pid < 0){
@@ -95,14 +144,33 @@ int main(int argc, char** argv)
     if(MAP_FAILED == (tool = (DogTools_t*)mmap(NULL, sizeof(DogTools_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0)))
         ERR("mmap");
 
+    int *raceTrack;
+    if(MAP_FAILED == (raceTrack = (int*)mmap(NULL, L * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0)))
+        ERR("mmap");
+
+    fill_array(raceTrack,L);
     pthread_barrierattr_t attr;
     pthread_barrierattr_setpshared(&attr,PTHREAD_PROCESS_SHARED);
     pthread_barrier_init(&tool->barrier, &attr, 1);
-    dog_breed(N, tool);
+
+    pthread_mutexattr_t mutexAttr = init_mutex();
+    for(int i=0;i<MAX_DOG_COUNT;i++){
+        pthread_mutex_init(&tool->dogMutexes[i], &mutexAttr);
+    }
+
+    // main
+    dog_breed(N, L, tool, raceTrack);
     while(wait(NULL) > 0);
+
+    // cleanup
     pthread_barrier_destroy(&tool->barrier);
     pthread_barrierattr_destroy(&attr);
+    for(int i=0;i<MAX_DOG_COUNT;i++){
+        pthread_mutex_destroy(&tool->dogMutexes[i]);
+    }
+    pthread_mutexattr_destroy(&mutexAttr);
     munmap(tool, sizeof(DogTools_t));
+    munmap(raceTrack, sizeof(int)*L);
     return 0;
 }
 
