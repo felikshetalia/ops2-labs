@@ -12,6 +12,10 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/mman.h>
+
+
 
 #define ERR(source) \
     (fprintf(stderr, "%s:%d\n", __FILE__, __LINE__), perror(source), kill(0, SIGKILL), exit(EXIT_FAILURE))
@@ -36,18 +40,6 @@ void msleep(int millisec)
     {
     }
 }
-
-typedef struct {
-    knight_t* Francis;
-    knight_t* Saracenis;
-    pthread_mutex_t* knightMutexes;
-} threadObjs_t;
-
-typedef struct{
-    char name[MAX_KNIGHT_NAME_LENGTH];
-    int HP;
-    int attack;
-} knight_t;
 
 int count_descriptors()
 {
@@ -78,78 +70,61 @@ int count_descriptors()
     return count - 1;  // one descriptor for open directory
 }
 
-pthread_mutexattr_t init_mutex(){
-    pthread_mutexattr_t attr;
-    pthread_mutexattr_init(&attr);
-    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
-    pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST);
+typedef struct{
+    char name[MAX_KNIGHT_NAME_LENGTH];
+    int HP;
+    int attack;
+} knight_t;
 
-    return attr;
-}
-
-void* saraceniOperate(){
-
-}
-
-void* francisOperate(){
-
-}
-
-void run_thread(threadObjs_t obj){
-    int err = pthread_create(obj, NULL, francisOperate, NULL);
-    if (err != 0)
-        ERR("Couldn't create thread");
-}
+typedef struct {
+    knight_t* FranciSoldiers;
+    knight_t* SaraceniSoldiers;
+    pthread_mutex_t* knightMutexes;
+} shared_t;
 
 int main(int argc, char* argv[])
 {
     srand(getpid());
-
-    FILE* franciFile, *saraceniFile;
-    if((franciFile = fopen("franci.txt", "r")) == NULL){
+    FILE* francitxt, *saracenitxt;
+    if((francitxt = fopen("franci.txt", "r")) == NULL)
+    {
         printf("Franks have not arrived on the battlefield\n");
         ERR("fopen");
     }
-    if((saraceniFile = fopen("saraceni.txt", "r")) == NULL){
+    if((saracenitxt = fopen("saraceni.txt", "r")) == NULL)
+    {
         printf("Saracens have not arrived on the battlefield\n");
         ERR("fopen");
     }
 
-    int franciNo, saraceniNo;
-    // EOF exists
-    fscanf(franciFile, "%d", &franciNo);
-    fscanf(saraceniFile, "%d", &saraceniNo);
+    int noFrancis, noSaracenis;
+    fscanf(francitxt,"%d", &noFrancis);
+    fscanf(saracenitxt,"%d", &noSaracenis);
 
-    threadObjs_t sharedMemory;
-
-    knight_t* FranciSoldiers, *SaraceniSoldiers;
-
-    if((FranciSoldiers = calloc(franciNo, sizeof(knight_t))) == NULL)
-        ERR("calloc");
-    if((SaraceniSoldiers = calloc(saraceniNo, sizeof(knight_t))) == NULL)
-        ERR("calloc");
-
-    for(int i = 0; i < franciNo; i++){
-        fscanf(franciFile, "%s %d %d", FranciSoldiers[i].name, &FranciSoldiers[i].HP, &FranciSoldiers[i].attack);
-        printf("I am Frankish knight %s I will serve my king with my %d HP and %d attack\n", FranciSoldiers[i].name, FranciSoldiers[i].HP, FranciSoldiers[i].attack);
+    shared_t* sharedStock;
+    if(MAP_FAILED == (sharedStock = (shared_t*)mmap(NULL, sizeof(shared_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0))){
+        ERR("mmap");
     }
-    for(int i = 0; i < saraceniNo; i++){
-        fscanf(saraceniFile, "%s %d %d", SaraceniSoldiers[i].name, &SaraceniSoldiers[i].HP, &SaraceniSoldiers[i].attack);
-        printf("I am Saraceni knight %s I will serve my king with my %d HP and %d attack\n", SaraceniSoldiers[i].name, SaraceniSoldiers[i].HP, SaraceniSoldiers[i].attack);
-    }
-    fclose(franciFile);
-    fclose(saraceniFile);
 
-    sharedMemory.Francis = FranciSoldiers;
-    sharedMemory.Saracenis = SaraceniSoldiers;
-    sharedMemory.knightMutexes = calloc(franciNo*saraceniNo, sizeof(pthread_mutex_t));
-    if(sharedMemory.knightMutexes == NULL)
+    if((sharedStock->FranciSoldiers = calloc(noFrancis, sizeof(knight_t))) == NULL)
+        ERR("calloc");
+    if((sharedStock->SaraceniSoldiers = calloc(noSaracenis, sizeof(knight_t))) == NULL)
         ERR("calloc");
 
-    run_thread(sharedMemory);
-    free(sharedMemory.knightMutexes);
-    free(FranciSoldiers);
-    free(SaraceniSoldiers);
+    for (int i = 0; i < noFrancis; ++i){
+        fscanf(francitxt,"%s %d %d", sharedStock->FranciSoldiers[i].name, &sharedStock->FranciSoldiers[i].HP, &sharedStock->FranciSoldiers[i].attack);
+        printf("I am Frankish knight <%s>. I will serve my king with my <%d> HP and <%d> attack\n",sharedStock->FranciSoldiers[i].name, sharedStock->FranciSoldiers[i].HP, sharedStock->FranciSoldiers[i].attack);
+    }
+    for (int i = 0; i < noSaracenis; ++i){
+        fscanf(saracenitxt,"%s %d %d", sharedStock->SaraceniSoldiers[i].name, &sharedStock->SaraceniSoldiers[i].HP, &sharedStock->SaraceniSoldiers[i].attack);
+        printf("I am Spanish knight <%s>. I will serve my king with my <%d> HP and <%d> attack\n",sharedStock->SaraceniSoldiers[i].name, sharedStock->SaraceniSoldiers[i].HP, sharedStock->SaraceniSoldiers[i].attack);
+    }
+
+    fclose(francitxt);
+    fclose(saracenitxt);
+    free(sharedStock->FranciSoldiers);
+    free(sharedStock->SaraceniSoldiers);
+    munmap(sharedStock, sizeof(shared_t));
     printf("Opened descriptors: %d\n", count_descriptors());
     return 0;
 }
